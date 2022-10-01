@@ -17,7 +17,10 @@ Additionally, support for negative prompts was added.
 
 <h1 align="center">Installation</h1>
 
-Clone this repo somewhere and open terminal in its directory and type:
+First, install [conda](https://docs.conda.io/projects/conda/en/latest/user-guide/install/index.html).
+
+Then clone this repository somewhere and open terminal in its directory 
+and type:
 ``` shell
 conda env create -f environment.yaml
 ```
@@ -35,19 +38,8 @@ curl https://www.googleapis.com/storage/v1/b/aai-blog-files/o/sd-v1-4.ckpt?alt=m
 
 And you are done. For linux, that is.
 
-Support for windows is untested because I don't have windows
-box. There will be likely issues during building xformers. On linux,
-you need gcc<10.0.0 but on windows I have no idea so its up to you to
-solve it somehow...
-
-My guess is that you will have to remove following lines from 
-environment.yaml and then manually install required compiler in
-correct version and after that, proceed with instalation described 
-above.
-```yaml
-- gcc=9.5.0
-- gxx=9.5.0
-```
+Windows is currently not supported because `xformers` library does 
+not build there.
 
 Just for a side note, you can uninstall conda environment using:
 
@@ -151,4 +143,4 @@ Try this:
 
 <h1 align="center">TODO</h1>
 
-* Fix installation for windows boxes.
+* Windows support.
