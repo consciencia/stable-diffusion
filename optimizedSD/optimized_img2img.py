@@ -34,6 +34,23 @@ def load_model_from_config(ckpt, verbose=False):
     return sd
 
 
+def vectorize_prompt(modelCS, batch_size, prompt):
+    empty_result = modelCS.get_learned_conditioning(batch_size * [""])
+    result = torch.zeros_like(empty_result)
+    subprompts, weights = split_weighted_subprompts(prompt)
+    weights_sum = sum(weights)
+    cntr = 0
+    for i, subprompt in enumerate(subprompts):
+        cntr += 1
+        result = torch.add(result,
+                           modelCS.get_learned_conditioning(batch_size
+                                                            * [subprompt]),
+                           alpha=weights[i] / weights_sum)
+    if cntr == 0:
+        result = empty_result
+    return result
+
+
 def load_img(path, h0, w0):
 
     image = Image.open(path).convert("RGB")
@@ -54,16 +71,34 @@ def load_img(path, h0, w0):
 
 
 config = "optimizedSD/v1-inference.yaml"
-ckpt = "models/ldm/stable-diffusion-v1/model.ckpt"
+DEFAULT_CKPT = "models/ldm/stable-diffusion-v1/model.ckpt"
 
 parser = argparse.ArgumentParser()
-
 parser.add_argument(
-    "--prompt", type=str, nargs="?", default="a painting of a virus monster playing guitar", help="the prompt to render"
+    "--prompt",
+    type=str,
+    nargs="?",
+    default="a painting of a virus monster playing guitar",
+    help="the prompt to render"
 )
-parser.add_argument("--outdir", type=str, nargs="?", help="dir to write results to", default="outputs/img2img-samples")
-parser.add_argument("--init-img", type=str, nargs="?", help="path to the input image")
-
+parser.add_argument(
+    "--nprompt",
+    type=str,
+    default="",
+    help="negative prompt to render"
+)
+parser.add_argument(
+    "--outdir",
+    type=str,
+    nargs="?",
+    help="dir to write results to",
+    default="outputs/img2img-samples"
+)
+parser.add_argument(
+    "--init-img",
+    type=str,
+    nargs="?",
+    help="path to the input image")
 parser.add_argument(
     "--skip_grid",
     action="store_true",
@@ -174,6 +209,12 @@ parser.add_argument(
     choices=["ddim"],
     default="ddim",
 )
+parser.add_argument(
+    "--ckpt",
+    type=str,
+    help="path to checkpoint of model",
+    default=DEFAULT_CKPT,
+)
 opt = parser.parse_args()
 
 tic = time.time()
@@ -188,7 +229,7 @@ seed_everything(opt.seed)
 # Logging
 logger(vars(opt), log_csv = "logs/img2img_logs.csv")
 
-sd = load_model_from_config(f"{ckpt}")
+sd = load_model_from_config(f"{opt.ckpt}")
 li, lo = [], []
 for key, value in sd.items():
     sp = key.split(".")
@@ -209,7 +250,7 @@ for key in lo:
 config = OmegaConf.load(f"{config}")
 
 assert os.path.isfile(opt.init_img)
-init_image = load_img(opt.init_img, opt.H, opt.W).to(opt.device)
+init_image = load_img(opt.init_img, opt.H, opt.W).to("cpu")
 
 model = instantiate_from_config(config.modelUNet)
 _, _ = model.load_state_dict(sd, strict=False)
@@ -247,17 +288,11 @@ else:
         data = batch_size * list(data)
         data = list(chunk(sorted(data), batch_size))
 
-modelFS.to(opt.device)
+modelFS.to("cpu")
 
 init_image = repeat(init_image, "1 ... -> b ...", b=batch_size)
 init_latent = modelFS.get_first_stage_encoding(modelFS.encode_first_stage(init_image))  # move to latent space
-
-if opt.device != "cpu":
-    mem = torch.cuda.memory_allocated(device=opt.device) / 1e6
-    modelFS.to("cpu")
-    while torch.cuda.memory_allocated(device=opt.device) / 1e6 >= mem:
-        time.sleep(1)
-
+init_latent = init_latent.to(opt.device)
 
 assert 0.0 <= opt.strength <= 1.0, "can only work with strength in [0.0, 1.0]"
 t_enc = int(opt.strength * opt.ddim_steps)
@@ -271,12 +306,14 @@ else:
 
 seeds = ""
 with torch.no_grad():
-
     all_samples = list()
     for n in trange(opt.n_iter, desc="Sampling"):
         for prompts in tqdm(data, desc="data"):
-
-            sample_path = os.path.join(outpath, "_".join(re.split(":| ", prompts[0])))[:150]
+            sample_path = os.path.join(outpath,
+                                       "_".join(re.split(":| ",
+                                                         prompts[0])))[:150]
+            if prompts[0] == "":
+                sample_path = os.path.join(outpath, "empty_prompt")
             os.makedirs(sample_path, exist_ok=True)
             base_count = len(os.listdir(sample_path))
 
@@ -284,22 +321,12 @@ with torch.no_grad():
                 modelCS.to(opt.device)
                 uc = None
                 if opt.scale != 1.0:
-                    uc = modelCS.get_learned_conditioning(batch_size * [""])
+                    uc = vectorize_prompt(modelCS,
+                                          batch_size,
+                                          opt.nprompt)
                 if isinstance(prompts, tuple):
                     prompts = list(prompts)
-
-                subprompts, weights = split_weighted_subprompts(prompts[0])
-                if len(subprompts) > 1:
-                    c = torch.zeros_like(uc)
-                    totalWeight = sum(weights)
-                    # normalize each "sub prompt" and add it
-                    for i in range(len(subprompts)):
-                        weight = weights[i]
-                        # if not skip_normalize:
-                        weight = weight / totalWeight
-                        c = torch.add(c, modelCS.get_learned_conditioning(subprompts[i]), alpha=weight)
-                else:
-                    c = modelCS.get_learned_conditioning(prompts)
+                c = vectorize_prompt(modelCS, batch_size, prompts[0])
 
                 if opt.device != "cpu":
                     mem = torch.cuda.memory_allocated(device=opt.device) / 1e6
@@ -325,10 +352,10 @@ with torch.no_grad():
                     sampler = opt.sampler
                 )
 
-                modelFS.to(opt.device)
+                samples_ddim = samples_ddim.to("cpu")
+
                 print("saving images")
                 for i in range(batch_size):
-
                     x_samples_ddim = modelFS.decode_first_stage(samples_ddim[i].unsqueeze(0))
                     x_sample = torch.clamp((x_samples_ddim + 1.0) / 2.0, min=0.0, max=1.0)
                     x_sample = 255.0 * rearrange(x_sample[0].cpu().numpy(), "c h w -> h w c")
@@ -338,12 +365,6 @@ with torch.no_grad():
                     seeds += str(opt.seed) + ","
                     opt.seed += 1
                     base_count += 1
-
-                if opt.device != "cpu":
-                    mem = torch.cuda.memory_allocated(device=opt.device) / 1e6
-                    modelFS.to("cpu")
-                    while torch.cuda.memory_allocated(device=opt.device) / 1e6 >= mem:
-                        time.sleep(1)
 
                 del samples_ddim
                 print("memory_final = ", torch.cuda.memory_allocated(device=opt.device) / 1e6)

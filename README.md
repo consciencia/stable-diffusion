@@ -1,148 +1,142 @@
 <h1 align="center">Optimized Stable Diffusion</h1>
-<p align="center">
-    <img src="https://img.shields.io/github/last-commit/basujindal/stable-diffusion?logo=Python&logoColor=green&style=for-the-badge"/>
-        <img src="https://img.shields.io/github/issues/basujindal/stable-diffusion?logo=GitHub&style=for-the-badge"/>
-                <img src="https://img.shields.io/github/stars/basujindal/stable-diffusion?logo=GitHub&style=for-the-badge"/>
-</p>
 
-This repo is a modified version of the Stable Diffusion repo, optimized to use less VRAM than the original by sacrificing inference speed.
+This repo is a modified version of the basujindal fork of Stable
+Diffusion with the goal to reduce VRAM usage even more.
 
-To reduce the VRAM usage, the following opimizations are used:
+With this, you can generate 1088x1088 images with only 4GB GPUs.
 
-- the stable diffusion model is fragmented into four parts which are sent to the GPU only when needed. After the calculation is done, they are moved back to the CPU.
-- The attention calculation is done in parts.
+To reduce the VRAM usage, following additional optimizations were used:
+* Better tensor memory management. Inspirations was from [here](https://github.com/Doggettx/stable-diffusion).
+* Flash attention is used instead of normal attention. Inspiration was
+  from [here](https://www.photoroom.com/tech/stable-diffusion-100-percent-faster-with-memory-efficient-attention/).
+* First stage image encoding model and last stage image decoding model
+  were moved to CPU because both are very fast and very memory hungry
+  so it makes no sense to use GPU for them.
+
+Additionally, support for negative prompts was added.
 
 <h1 align="center">Installation</h1>
 
-All the modified files are in the [optimizedSD](optimizedSD) folder, so if you have already cloned the original repository you can just download and copy this folder into the original instead of cloning the entire repo. You can also clone this repo and follow the same installation steps as the original (mainly creating the conda environment and placing the weights at the specified location).
+Clone this repo somewhere and open terminal in its directory and type:
+``` shell
+conda env create -f environment.yaml
+```
 
-Alternatively, if you prefer to use Docker, you can do the following:
+Before calling stable diffusion in a terminal session, don't forget to
+activate conda environment with:
+``` shell
+conda activate ldm
+```
 
-1. Install [Docker](https://docs.docker.com/engine/install/), [Docker Compose plugin](https://docs.docker.com/compose/install/), and [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html#docker)
-2. Clone this repo to, e.g., `~/stable-diffusion`
-3. Put your downloaded `model.ckpt` file into `~/sd-data` (it's a relative path, you can change it in `docker-compose.yml`)
-4. `cd` into `~/stable-diffusion` and execute `docker compose up --build`
+Then download snapshot of SD model with:
+``` shell
+curl https://www.googleapis.com/storage/v1/b/aai-blog-files/o/sd-v1-4.ckpt?alt=media > sd-v1-4.ckpt
+```
 
-This will launch gradio on port 7860 with txt2img. You can also use `docker compose run` to execute other Python scripts.
+And you are done. For linux, that is.
+
+Support for windows is untested because I don't have windows
+box. There will be likely issues during building xformers. On linux,
+you need gcc<10.0.0 but on windows, I have no idea so its up to you to
+solve it somehow by editing `environment.yaml`...
+
+Just for a side note, you can uninstall conda environment using:
+
+``` shell
+conda deactivate
+conda env remove -n ldm
+rm -rf src
+```
 
 <h1 align="center">Usage</h1>
 
-## img2img
-
-- `img2img` can generate _512x512 images from a prior image and prompt using under 2.4GB VRAM in under 20 seconds per image_ on an RTX 2060.
-
-- The maximum size that can fit on 6GB GPU (RTX 2060) is around 1152x1088.
-
-- For example, the following command will generate 10 512x512 images:
-
-`python optimizedSD/optimized_img2img.py --prompt "Austrian alps" --init-img ~/sketch-mountains-input.jpg --strength 0.8 --n_iter 2 --n_samples 5 --H 512 --W 512`
-
 ## txt2img
 
-- `txt2img` can generate _512x512 images from a prompt using under 2.4GB GPU VRAM in under 24 seconds per image_ on an RTX 2060.
+``` shell
+python -B optimizedSD/optimized_txt2img.py --prompt "dog" --nprompt "dry" --precision full --ckpt sd-v1-4.ckpt --H 512 --W 512 --sampler euler_a --n_samples 10
+```
+* `--prompt` - Textual image description.
+* `--nprompt` - Negative textual image description. Things which you
+                don't want are placed here.
+* `--H` - Image height in pixels. Must be multiple of 64.
+* `--W` - Image width in pixels. Must be multiple of 64.
+* `--n_samples` - Number of images to generate at once. When
+                  generating 1088x1088 images, only one sample is
+                  supported on 4GB GPUs.
 
-- For example, the following command will generate 10 512x512 images:
+## img2img
 
-`python optimizedSD/optimized_txt2img.py --prompt "Cyberpunk style image of a Tesla car reflection in rain" --H 512 --W 512 --seed 27 --n_iter 2 --n_samples 5 --ddim_steps 50`
+``` shell
+python -B $THISDIR/optimizedSD/optimized_img2img.py --prompt "dog" --nprompt "dry" --init-img path/to/init/image.jpg --strength 0.75 --precision full --ckpt $THISDIR/sd-v1-4.ckpt --H 512 --W 512 --n_samples 1
+```
+* `--prompt` - Textual image description.
+* `--nprompt` - Negative textual image description. Things which you
+                don't want are placed here.
+* `--init-img` - Path to initialization image.
+* `--strength` - Amount of noise to be added into initialization
+                 image. Value of 0.75 stands for 75% of initialization
+                 image to be noise. Keep this value low when you want
+                 to prevent SD from doing too much pervasive changes to
+                 initialization image.
+* `--H` - Image height in pixels. Must be multiple of 64.
+* `--W` - Image width in pixels. Must be multiple of 64.
+* `--n_samples` - Number of images to generate at once. Because
+                  img2img is more VRAM intensive than txt2img, keep
+                  sample count low on 4GB GPUs.
 
-## inpainting
+<h1 align="center">Weight blocks</h1>
 
-- `inpaint_gradio.py` can fill masked parts of an image based on a given prompt. It can inpaint 512x512 images while using under 2.5GB of VRAM.
+You can use weight blocks for standard prompts and for negative prompts.
 
-- To launch the gradio interface for inpainting, run `python optimizedSD/inpaint_gradio.py`. The mask for the image can be drawn on the selected image using the brush tool.
+Example:
 
-- The results are not yet perfect but can be improved by using a combination of prompt weighting, prompt engineering and testing out multiple values of the `--strength` argument.
+``` text
+picture of:1 small:0.5 cat sitting on:1 big:2 dog
+```
 
-- _Suggestions to improve the inpainting algorithm are most welcome_.
+Will be interpreted as 5 different prompts, each with its own weight:
+``` text
+picture of -> weight 1
+small -> weight 0.5
+cat sitting on -> weight 1
+big -> weight 2
+dog -> weight 1
+```
 
-<h1 align="center">Using the Gradio GUI</h1>
+These 5 prompts will be separately processed and results averaged with
+the respect to specified weights.
 
-- You can also use the built-in gradio interface for `img2img`, `txt2img` & `inpainting` instead of the command line interface. Activate the conda environment and install the latest version of gradio using `pip install gradio`,
+To sum it up, always make sure that weight blocks make sense from
+semantical point of view because prompt encoder interprets them in
+isolation. Just for clarity, example above is wrong because weight
+blocks does not make desired sense when interpreted in isolation.
 
-- Run img2img using `python optimizedSD/img2img_gradio.py`, txt2img using `python optimizedSD/txt2img_gradio.py` and inpainting using `python optimizedSD/inpaint_gradio.py`.
+<h1 align="center">Troubleshooting</h1>
 
-- img2img_gradio.py has a feature to crop input images. Look for the pen symbol in the image box after selecting the image.
+## Green colored output images
+If you have a Nvidia GTX series GPU, the output images maybe
+entirely green in color. This is because GTX series do not support
+half precision calculation, which is the default mode of calculation
+in this repository. To overcome the issue, use the `--precision full`
+argument. The downside is that it will lead to higher GPU VRAM usage.
 
-<h1 align="center">Arguments</h1>
+## Distorted images in higher resolution
+Stable diffusion was trained on 512x512 images so it does not know how
+to fill the space in larger images so it just combines content of
+multiple smaller images into one which is obviously wrong because
+resulting composition does not make sense.
 
-## `--seed`
+You can mitigate this by first generating 512x512 image. Then resizing
+it (not upscaling) to desired resolution and feeding it to img2img
+together with original prompt and `--strength 0.75`. Stable diffusion
+will then just polish things up without trying to come up with some
+new composition.
 
-**Seed for image generation**, can be used to reproduce previously generated images. Defaults to a random seed if unspecified.
+## Faces and bodies are deformed
+Stable diffusion is known to not work well with faces and generally
+human bodies. You can mitigate this by using negative prompts.
 
-- The code will give the seed number along with each generated image. To generate the same image again, just specify the seed using `--seed` argument. Images are saved with its seed number as its name by default.
-
-- For example if the seed number for an image is `1234` and it's the 55th image in the folder, the image name will be named `seed_1234_00055.png`.
-
-## `--n_samples`
-
-**Batch size/amount of images to generate at once.**
-
-- To get the lowest inference time per image, use the maximum batch size `--n_samples` that can fit on the GPU. Inference time per image will reduce on increasing the batch size, but the required VRAM will increase.
-
-- If you get a CUDA out of memory error, try reducing the batch size `--n_samples`. If it doesn't work, the other option is to reduce the image width `--W` or height `--H` or both.
-
-## `--n_iter`
-
-**Run _x_ amount of times**
-
-- Equivalent to running the script n_iter number of times. Only difference is that the model is loaded only once per n_iter iterations. Unlike `n_samples`, reducing it doesn't have an effect on VRAM required or inference time.
-
-## `--H` & `--W`
-
-**Height & width of the generated image.**
-
-- Both height and width should be a multiple of 64.
-
-## `--turbo`
-
-**Increases inference speed at the cost of extra VRAM usage.**
-
-- Using this argument increases the inference speed by using around 700MB of extra GPU VRAM. It is especially effective when generating a small batch of images (~ 1 to 4) images. It takes under 20 seconds for txt2img and 15 seconds for img2img (on an RTX 2060, excluding the time to load the model). Use it on larger batch sizes if GPU VRAM available.
-
-## `--precision autocast` or `--precision full`
-
-**Whether to use `full` or `mixed` precision**
-
-- Mixed Precision is enabled by default. If you don't have a GPU with tensor cores (any GTX 10 series card), you may not be able use mixed precision. Use the `--precision full` argument to disable it.
-
-## `--format png` or `--format jpg`
-
-**Output image format**
-
-- The default output format is `png`. While `png` is lossless, it takes up a lot of space (unless large portions of the image happen to be a single colour). Use lossy `jpg` to get smaller image file sizes.
-
-## `--unet_bs`
-
-**Batch size for the unet model**
-
-- Takes up a lot of extra RAM for **very little improvement** in inference time. `unet_bs` > 1 is not recommended!
-
-- Should generally be a multiple of 2x(n_samples)
-
-<h1 align="center">Weighted Prompts</h1>
-
-- Prompts can also be weighted to put relative emphasis on certain words.
-  eg. `--prompt tabby cat:0.25 white duck:0.75 hybrid`.
-
-- The number followed by the colon represents the weight given to the words before the colon. The weights can be both fractions or integers.
-
-## Troubleshooting
-
-### Green colored output images
-
-- If you have a Nvidia GTX series GPU, the output images maybe entirely green in color. This is because GTX series do not support half precision calculation, which is the default mode of calculation in this repository. To overcome the issue, use the `--precision full` argument. The downside is that it will lead to higher GPU VRAM usage.
-
-###
-
-## Changelog
-
-- v1.0: Added support for multiple samplers for txt2img. Based on [crowsonkb](https://github.com/crowsonkb/k-diffusion)
-- v0.9: Added support for calculating attention in parts. (Thanks to @neonsecret @Doggettx, @ryudrigo)
-- v0.8: Added gradio interface for inpainting.
-- v0.7: Added support for logging, jpg file format
-- v0.6: Added support for using weighted prompts. (based on @lstein's [repo](https://github.com/lstein/stable-diffusion))
-- v0.5: Added support for using gradio interface.
-- v0.4: Added support for specifying image seed.
-- v0.3: Added support for using mixed precision.
-- v0.2: Added support for generating images in batches.
-- v0.1: Split the model into multiple parts to run it on lower VRAM.
+Try this:
+``` shell
+--nprompt "extra limbs, deformed body, blurred, long neck"
+```

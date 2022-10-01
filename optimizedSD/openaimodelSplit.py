@@ -13,7 +13,7 @@ from ldm.modules.diffusionmodules.util import (
     normalization,
     timestep_embedding,
 )
-from splitAttention import SpatialTransformer
+from ldm.modules.attention import SpatialTransformer
 
 
 class AttentionPool2d(nn.Module):
@@ -608,7 +608,7 @@ class UNetModelEncode(nn.Module):
             h = module(h, emb, context)
             hs.append(h)
         h = self.middle_block(h, emb, context)
-        
+
         return h, emb, hs
 
 
@@ -796,7 +796,7 @@ class UNetModelDecode(nn.Module):
         :param y: an [N] Tensor of labels, if class-conditional.
         :return: an [N x C x ...] Tensor of outputs.
         """
-        
+
         for module in self.output_blocks:
             h = th.cat([h, hs.pop()], dim=1)
             h = module(h, emb, context)

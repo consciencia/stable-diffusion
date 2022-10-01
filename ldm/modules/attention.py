@@ -4,6 +4,9 @@ import torch
 import torch.nn.functional as F
 from torch import nn, einsum
 from einops import rearrange, repeat
+import xformers
+import xformers.ops
+from typing import Any, Optional
 
 from ldm.modules.diffusionmodules.util import checkpoint
 
@@ -61,7 +64,9 @@ class FeedForward(nn.Module):
         )
 
     def forward(self, x):
-        return self.net(x)
+        o = self.net(x)
+        del x
+        return o
 
 
 def zero_module(module):
@@ -74,7 +79,10 @@ def zero_module(module):
 
 
 def Normalize(in_channels):
-    return torch.nn.GroupNorm(num_groups=32, num_channels=in_channels, eps=1e-6, affine=True)
+    return torch.nn.GroupNorm(num_groups=32,
+                              num_channels=in_channels,
+                              eps=1e-6,
+                              affine=True)
 
 
 class LinearAttention(nn.Module):
@@ -88,12 +96,27 @@ class LinearAttention(nn.Module):
     def forward(self, x):
         b, c, h, w = x.shape
         qkv = self.to_qkv(x)
-        q, k, v = rearrange(qkv, 'b (qkv heads c) h w -> qkv b heads c (h w)', heads = self.heads, qkv=3)
-        k = k.softmax(dim=-1)  
-        context = torch.einsum('bhdn,bhen->bhde', k, v)
-        out = torch.einsum('bhde,bhdn->bhen', context, q)
-        out = rearrange(out, 'b heads c (h w) -> b (heads c) h w', heads=self.heads, h=h, w=w)
-        return self.to_out(out)
+        del x
+        q, k1, v = rearrange(qkv,
+                            'b (qkv heads c) h w -> qkv b heads c (h w)',
+                            heads=self.heads,
+                            qkv=3)
+        del qkv
+        k2 = k1.softmax(dim=-1)
+        del k1
+        context = torch.einsum('bhdn,bhen->bhde', k2, v)
+        del k2, v
+        out1 = torch.einsum('bhde,bhdn->bhen', context, q)
+        del context, q
+        out2 = rearrange(out1,
+                         'b heads c (h w) -> b (heads c) h w',
+                         heads=self.heads,
+                         h=h,
+                         w=w)
+        del out1
+        out3 = self.to_out(out2)
+        del out2
+        return out3
 
 
 class SpatialSelfAttention(nn.Module):
@@ -193,26 +216,105 @@ class CrossAttention(nn.Module):
         return self.to_out(out)
 
 
+class MemoryEfficientCrossAttention(nn.Module):
+     def __init__(self, query_dim, context_dim=None, heads=8, dim_head=64, dropout=0.0):
+         super().__init__()
+         inner_dim = dim_head * heads
+         context_dim = default(context_dim, query_dim)
+
+         self.heads = heads
+         self.dim_head = dim_head
+
+         self.to_q = nn.Linear(query_dim, inner_dim, bias=False)
+         self.to_k = nn.Linear(context_dim, inner_dim, bias=False)
+         self.to_v = nn.Linear(context_dim, inner_dim, bias=False)
+
+         self.to_out = nn.Sequential(nn.Linear(inner_dim, query_dim), nn.Dropout(dropout))
+         self.attention_op: Optional[Any] = None
+
+     def forward(self, x, context=None, mask=None):
+         q_in = self.to_q(x)
+         context = default(context, x)
+         k_in = self.to_k(context)
+         v_in = self.to_v(context)
+         del context, x
+
+         b, _, _ = q_in.shape
+         q, k, v = map(
+             lambda t: t.unsqueeze(3)
+             .reshape(b, t.shape[1], self.heads, self.dim_head)
+             .permute(0, 2, 1, 3)
+             .reshape(b * self.heads, t.shape[1], self.dim_head)
+             .contiguous(),
+             (q_in, k_in, v_in),
+         )
+         del q_in, k_in, v_in
+
+         # actually compute the attention, what we cannot get enough of
+         out = xformers.ops.memory_efficient_attention(q,
+                                                       k,
+                                                       v,
+                                                       attn_bias=None,
+                                                       op=self.attention_op)
+         del q, k, v
+
+         # TODO: Use this directly in the attention operation, as a bias
+         if exists(mask):
+             raise NotImplementedError()
+         out2 = (out.unsqueeze(0)
+                 .reshape(b, self.heads, out.shape[1], self.dim_head)
+                 .permute(0, 2, 1, 3)
+                 .reshape(b, out.shape[1], self.heads * self.dim_head))
+         del out
+
+         out3 = self.to_out(out2)
+         del out2
+
+         return out3
+
+
 class BasicTransformerBlock(nn.Module):
     def __init__(self, dim, n_heads, d_head, dropout=0., context_dim=None, gated_ff=True, checkpoint=True):
         super().__init__()
-        self.attn1 = CrossAttention(query_dim=dim, heads=n_heads, dim_head=d_head, dropout=dropout)  # is a self-attention
+        # is a self-attention
+        self.attn1 = MemoryEfficientCrossAttention(query_dim=dim,
+                                                   heads=n_heads,
+                                                   dim_head=d_head,
+                                                   dropout=dropout)
         self.ff = FeedForward(dim, dropout=dropout, glu=gated_ff)
-        self.attn2 = CrossAttention(query_dim=dim, context_dim=context_dim,
-                                    heads=n_heads, dim_head=d_head, dropout=dropout)  # is self-attn if context is none
+        # is self-attn if context is none
+        self.attn2 = MemoryEfficientCrossAttention(query_dim=dim,
+                                                   context_dim=context_dim,
+                                                   heads=n_heads,
+                                                   dim_head=d_head,
+                                                   dropout=dropout)
         self.norm1 = nn.LayerNorm(dim)
         self.norm2 = nn.LayerNorm(dim)
         self.norm3 = nn.LayerNorm(dim)
         self.checkpoint = checkpoint
 
+    def _set_attention_slice(self, slice_size):
+        self.attn1._slice_size = slice_size
+        self.attn2._slice_size = slice_size
+
     def forward(self, x, context=None):
-        return checkpoint(self._forward, (x, context), self.parameters(), self.checkpoint)
+        return checkpoint(self._forward,
+                          (x, context),
+                          self.parameters(),
+                          self.checkpoint)
 
     def _forward(self, x, context=None):
-        x = self.attn1(self.norm1(x)) + x
-        x = self.attn2(self.norm2(x), context=context) + x
-        x = self.ff(self.norm3(x)) + x
-        return x
+        x = x.contiguous() if x.device.type == "mps" else x
+        x1 = self.attn1(self.norm1(x))
+        x1 += x
+        del x
+        x2 = self.attn2(self.norm2(x1), context=context)
+        x2 += x1
+        del x1
+        x3 = self.ff(self.norm3(x2))
+        x3 += x2
+        del x2
+        return x3
 
 
 class SpatialTransformer(nn.Module):
@@ -237,7 +339,11 @@ class SpatialTransformer(nn.Module):
                                  padding=0)
 
         self.transformer_blocks = nn.ModuleList(
-            [BasicTransformerBlock(inner_dim, n_heads, d_head, dropout=dropout, context_dim=context_dim)
+            [BasicTransformerBlock(inner_dim,
+                                   n_heads,
+                                   d_head,
+                                   dropout=dropout,
+                                   context_dim=context_dim)
                 for d in range(depth)]
         )
 
@@ -251,11 +357,19 @@ class SpatialTransformer(nn.Module):
         # note: if no context is given, cross-attention defaults to self-attention
         b, c, h, w = x.shape
         x_in = x
-        x = self.norm(x)
-        x = self.proj_in(x)
-        x = rearrange(x, 'b c h w -> b (h w) c')
+        x1 = self.norm(x)
+        x2 = self.proj_in(x1)
+        del x1
+        x3 = rearrange(x2, 'b c h w -> b (h w) c')
+        del x2
         for block in self.transformer_blocks:
-            x = block(x, context=context)
-        x = rearrange(x, 'b (h w) c -> b c h w', h=h, w=w)
-        x = self.proj_out(x)
-        return x + x_in
+            t = x3
+            x3 = block(t, context=context)
+            del t
+        x4 = rearrange(x3, 'b (h w) c -> b c h w', h=h, w=w)
+        del x3
+        x5 = self.proj_out(x4)
+        del x4
+        x5 += x_in
+        del x_in
+        return x5

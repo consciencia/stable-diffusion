@@ -1,4 +1,5 @@
 # pytorch_diffusion + derived encoder decoder
+import gc
 import math
 import torch
 import torch.nn as nn
@@ -47,10 +48,18 @@ class Upsample(nn.Module):
                                         padding=1)
 
     def forward(self, x):
-        x = torch.nn.functional.interpolate(x, scale_factor=2.0, mode="nearest")
+        x1 = torch.nn.functional.interpolate(x,
+                                             scale_factor=2.0,
+                                             mode="nearest")
+        del x
+
         if self.with_conv:
-            x = self.conv(x)
-        return x
+            x2 = self.conv(x1)
+            del x1
+        else:
+            x2 = x1
+
+        return x2
 
 
 class Downsample(nn.Module):
@@ -115,26 +124,41 @@ class ResnetBlock(nn.Module):
                                                     padding=0)
 
     def forward(self, x, temb):
-        h = x
-        h = self.norm1(h)
-        h = silu(h)
-        h = self.conv1(h)
+        h2 = self.norm1(x)
+        h3 = silu(h2)
+        del h2
+
+        h4 = self.conv1(h3)
+        del h3
 
         if temb is not None:
-            h = h + self.temb_proj(silu(temb))[:,:,None,None]
+            h4 += self.temb_proj(silu(temb))[:,:,None,None]
 
-        h = self.norm2(h)
-        h = silu(h)
-        h = self.dropout(h)
-        h = self.conv2(h)
+        h5 = self.norm2(h4)
+        del h4
+
+        h6 = silu(h5)
+        del h5
+
+        h7 = self.dropout(h6)
+        del h6
+
+        h8 = self.conv2(h7)
+        del h7
 
         if self.in_channels != self.out_channels:
             if self.use_conv_shortcut:
-                x = self.conv_shortcut(x)
+                x_out = self.conv_shortcut(x)
             else:
-                x = self.nin_shortcut(x)
+                x_out = self.nin_shortcut(x)
+            del x
+        else:
+            x_out = x
 
-        return x+h
+        x_out += h8
+        del h8
+
+        return x_out
 
 
 class LinAttnBlock(LinearAttention):
@@ -172,30 +196,41 @@ class AttnBlock(nn.Module):
 
 
     def forward(self, x):
-        h_ = x
-        h_ = self.norm(h_)
-        q = self.q(h_)
-        k = self.k(h_)
-        v = self.v(h_)
+        h_1 = self.norm(x)
+        q1 = self.q(h_1)
+        k1 = self.k(h_1)
+        v1 = self.v(h_1)
+        del h_1
 
         # compute attention
-        b,c,h,w = q.shape
-        q = q.reshape(b,c,h*w)
-        q = q.permute(0,2,1)   # b,hw,c
-        k = k.reshape(b,c,h*w) # b,c,hw
-        w_ = torch.bmm(q,k)     # b,hw,hw    w[b,i,j]=sum_c q[b,i,c]k[b,c,j]
-        w_ = w_ * (int(c)**(-0.5))
-        w_ = torch.nn.functional.softmax(w_, dim=2)
+        b, c, h, w = q1.shape
+        q2 = q1.reshape(b, c, h * w)
+        del q1
+        q3 = q2.permute(0, 2, 1)   # b,hw,c
+        del q2
+        k2 = k1.reshape(b, c, h * w) # b,c,hw
+        del k1
+        w_1 = torch.bmm(q3, k2) # b,hw,hw    w[b,i,j]=sum_c q[b,i,c]k[b,c,j]
+        w_1 *= (int(c)**(-0.5))
+        w_3 = torch.nn.functional.softmax(w_1, dim=2)
+        del w_1
 
         # attend to values
-        v = v.reshape(b,c,h*w)
-        w_ = w_.permute(0,2,1)   # b,hw,hw (first hw of k, second of q)
-        h_ = torch.bmm(v,w_)     # b, c,hw (hw of q) h_[b,c,j] = sum_i v[b,c,i] w_[b,i,j]
-        h_ = h_.reshape(b,c,h,w)
+        v2 = v1.reshape(b, c, h * w)
+        del v1
+        w_4 = w_3.permute(0, 2, 1) # b,hw,hw (first hw of k, second of q)
+        del w_3
+        h_2 = torch.bmm(v2, w_4) # b, c,hw (hw of q) h_[b,c,j] = sum_i v[b,c,i] w_[b,i,j]
+        h_3 = h_2.reshape(b, c, h, w)
+        del h_2
 
-        h_ = self.proj_out(h_)
+        h_4 = self.proj_out(h_3)
+        del h_3
 
-        return x+h_
+        h_4 += x
+        del x
+
+        return h_4
 
 
 def make_attn(in_channels, attn_type="vanilla"):
@@ -536,32 +571,52 @@ class Decoder(nn.Module):
         temb = None
 
         # z to block_in
-        h = self.conv_in(z)
+        h1 = self.conv_in(z)
+        del z
 
         # middle
-        h = self.mid.block_1(h, temb)
-        h = self.mid.attn_1(h)
-        h = self.mid.block_2(h, temb)
+        h2 = self.mid.block_1(h1, temb)
+        del h1
+        h3 = self.mid.attn_1(h2)
+        del h2
+        h4 = self.mid.block_2(h3, temb)
+        del h3
+
+        # prepare for up sampling
+        gc.collect()
+        torch.cuda.empty_cache()
 
         # upsampling
         for i_level in reversed(range(self.num_resolutions)):
             for i_block in range(self.num_res_blocks+1):
-                h = self.up[i_level].block[i_block](h, temb)
+                t = h4
+                h4 = self.up[i_level].block[i_block](t, temb)
+                del t
                 if len(self.up[i_level].attn) > 0:
-                    h = self.up[i_level].attn[i_block](h)
+                    t = h4
+                    h4 = self.up[i_level].attn[i_block](t)
+                    del t
             if i_level != 0:
-                h = self.up[i_level].upsample(h)
+                t = h4
+                h4 = self.up[i_level].upsample(t)
+                del t
 
         # end
         if self.give_pre_end:
-            return h
+            return h4
 
-        h = self.norm_out(h)
-        h = silu(h)
-        h = self.conv_out(h)
+        h5 = self.norm_out(h4)
+        del h4
+        h6 = silu(h5)
+        del h5
+        h7 = self.conv_out(h6)
+        del h6
         if self.tanh_out:
-            h = torch.tanh(h)
-        return h
+            h_out = torch.tanh(h7)
+            del h7
+        else:
+            h_out = h7
+        return h_out
 
 
 class SimpleDecoder(nn.Module):
@@ -828,4 +883,3 @@ class FirstStagePostProcessor(nn.Module):
         if self.do_reshape:
             z = rearrange(z,'b c h w -> b (h w) c')
         return z
-
