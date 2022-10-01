@@ -6,7 +6,7 @@ Diffusion with the goal to reduce VRAM usage even more.
 With this, you can generate 1088x1088 images with only 4GB GPUs.
 
 To reduce the VRAM usage, following additional optimizations were used:
-* Better tensor memory management. Inspirations was from [here](https://github.com/Doggettx/stable-diffusion).
+* Better tensor memory management. Inspiration was from [here](https://github.com/Doggettx/stable-diffusion).
 * Flash attention is used instead of normal attention. Inspiration was
   from [here](https://www.photoroom.com/tech/stable-diffusion-100-percent-faster-with-memory-efficient-attention/).
 * First stage image encoding model and last stage image decoding model
