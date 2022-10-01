@@ -89,9 +89,7 @@ python -B optimizedSD/optimized_img2img.py --prompt "dog" --nprompt "dry" --init
                  initialization image.
 * `--H` - Image height in pixels. Must be multiple of 64.
 * `--W` - Image width in pixels. Must be multiple of 64.
-* `--n_samples` - Number of images to generate at once. Because
-                  img2img is more VRAM intensive than txt2img, keep
-                  sample count low on 4GB GPUs.
+* `--n_samples` - Number of images to generate at once.
 
 <h1 align="center">Weight blocks</h1>
 
@@ -123,10 +121,9 @@ blocks does not make desired sense when interpreted in isolation.
 <h1 align="center">Troubleshooting</h1>
 
 ## Green colored output images
-If you have a Nvidia GTX series GPU, the output images maybe
-entirely green in color. This is because GTX series do not support
-half precision calculation, which is the default mode of calculation
-in this repository. To overcome the issue, use the `--precision full`
+If you have a Nvidia GTX series GPU, the output images may be
+entirely green in color. This is because GTX series does not support
+half precision calculations. To overcome the issue, use the `--precision full`
 argument. The downside is that it will lead to higher GPU VRAM usage.
 
 ## Distorted images in higher resolution
