@@ -89,7 +89,9 @@ python -B optimizedSD/optimized_img2img.py --prompt "dog" --nprompt "dry" --init
                  initialization image.
 * `--H` - Image height in pixels. Must be multiple of 64.
 * `--W` - Image width in pixels. Must be multiple of 64.
-* `--n_samples` - Number of images to generate at once.
+* `--n_samples` - Number of images to generate at once. When generating 
+                  1088x1088 images, only one sample is supported on 4GB 
+                  GPUs.
 
 <h1 align="center">Weight blocks</h1>
 
@@ -123,7 +125,7 @@ blocks does not make desired sense when interpreted in isolation.
 ## Green colored output images
 If you have a Nvidia GTX series GPU, the output images may be
 entirely green in color. This is because GTX series does not support
-half precision calculations. To overcome the issue, use the `--precision full`
+half precision calculations. To overcome this issue, use the `--precision full`
 argument. The downside is that it will lead to higher GPU VRAM usage.
 
 ## Distorted images in higher resolution
@@ -146,3 +148,7 @@ Try this:
 ``` shell
 --nprompt "extra limbs, deformed body, blurred, long neck"
 ```
+
+<h1 align="center">TODO</h1>
+
+* Fix installation for windows boxes.
