@@ -67,7 +67,7 @@ python -B optimizedSD/optimized_txt2img.py --prompt "dog" --nprompt "dry" --prec
 ## img2img
 
 ``` shell
-python -B $THISDIR/optimizedSD/optimized_img2img.py --prompt "dog" --nprompt "dry" --init-img path/to/init/image.jpg --strength 0.75 --precision full --ckpt $THISDIR/sd-v1-4.ckpt --H 512 --W 512 --n_samples 1
+python -B optimizedSD/optimized_img2img.py --prompt "dog" --nprompt "dry" --init-img path/to/init/image.jpg --strength 0.75 --precision full --ckpt sd-v1-4.ckpt --H 512 --W 512 --n_samples 1
 ```
 * `--prompt` - Textual image description.
 * `--nprompt` - Negative textual image description. Things which you
