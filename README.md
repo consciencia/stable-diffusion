@@ -37,8 +37,17 @@ And you are done. For linux, that is.
 
 Support for windows is untested because I don't have windows
 box. There will be likely issues during building xformers. On linux,
-you need gcc<10.0.0 but on windows, I have no idea so its up to you to
-solve it somehow by editing `environment.yaml`...
+you need gcc<10.0.0 but on windows I have no idea so its up to you to
+solve it somehow...
+
+My guess is that you will have to remove following lines from 
+environment.yaml and then manually install required compiler in
+correct version and after that, proceed with instalation described 
+above.
+```yaml
+- gcc=9.5.0
+- gxx=9.5.0
+```
 
 Just for a side note, you can uninstall conda environment using:
 
