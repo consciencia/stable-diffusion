@@ -143,4 +143,5 @@ Try this:
 
 <h1 align="center">TODO</h1>
 
+* Fix inpaiting.
 * Windows support.
