@@ -19,6 +19,13 @@ Additionally, support for negative prompts was added.
 
 First, install [conda](https://docs.conda.io/projects/conda/en/latest/user-guide/install/index.html).
 
+**If you already have `ldm` conda environment because you already used Stable 
+Diffusion, remove it because this fork uses different package versions than 
+other forks in order to be compatible with `xformers`.**
+```shell
+conda env remove -n ldm
+```
+
 Then clone this repository somewhere and open terminal in its directory 
 and type:
 ``` shell
@@ -41,13 +48,7 @@ And you are done. For linux, that is.
 Windows is currently not supported because `xformers` library does 
 not build there.
 
-Just for a side note, you can uninstall conda environment using:
-
-``` shell
-conda deactivate
-conda env remove -n ldm
-rm -rf src
-```
+**Warning: Never ever try to install explicitly `xformers`, it will fail because it is dependant on specific version of GCC and pytorch. Let conda handle this.**
 
 <h1 align="center">Usage</h1>
 
