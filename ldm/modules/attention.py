@@ -1,11 +1,13 @@
+import os
 from inspect import isfunction
 import math
 import torch
 import torch.nn.functional as F
 from torch import nn, einsum
 from einops import rearrange, repeat
-import xformers
-import xformers.ops
+if os.name != "nt":
+    import xformers
+    import xformers.ops
 from typing import Any, Optional
 
 from ldm.modules.diffusionmodules.util import checkpoint
@@ -173,22 +175,21 @@ class SpatialSelfAttention(nn.Module):
 
 
 class CrossAttention(nn.Module):
-    def __init__(self, query_dim, context_dim=None, heads=8, dim_head=64, dropout=0.):
+    def __init__(self, query_dim, context_dim=None, heads=8, dim_head=64, dropout=0., att_step=1):
         super().__init__()
         inner_dim = dim_head * heads
         context_dim = default(context_dim, query_dim)
 
         self.scale = dim_head ** -0.5
         self.heads = heads
+        self.att_step = att_step
 
         self.to_q = nn.Linear(query_dim, inner_dim, bias=False)
         self.to_k = nn.Linear(context_dim, inner_dim, bias=False)
         self.to_v = nn.Linear(context_dim, inner_dim, bias=False)
 
-        self.to_out = nn.Sequential(
-            nn.Linear(inner_dim, query_dim),
-            nn.Dropout(dropout)
-        )
+        self.to_out = nn.Sequential(nn.Linear(inner_dim, query_dim),
+                                    nn.Dropout(dropout))
 
     def forward(self, x, context=None, mask=None):
         h = self.heads
@@ -197,23 +198,54 @@ class CrossAttention(nn.Module):
         context = default(context, x)
         k = self.to_k(context)
         v = self.to_v(context)
+        del context, x
 
-        q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> (b h) n d', h=h), (q, k, v))
+        q1, k1, v1 = map(lambda t: rearrange(t, 'b n (h d) -> (b h) n d', h=h),
+                         (q, k, v))
+        del q, k, v
 
-        sim = einsum('b i d, b j d -> b i j', q, k) * self.scale
 
-        if exists(mask):
-            mask = rearrange(mask, 'b ... -> b (...)')
-            max_neg_value = -torch.finfo(sim.dtype).max
-            mask = repeat(mask, 'b j -> (b h) () j', h=h)
-            sim.masked_fill_(~mask, max_neg_value)
+        limit = k1.shape[0]
+        att_step = self.att_step
+        q_chunks = list(torch.tensor_split(q1, limit // att_step, dim=0))
+        k_chunks = list(torch.tensor_split(k1, limit // att_step, dim=0))
+        v_chunks = list(torch.tensor_split(v1, limit // att_step, dim=0))
+        q_chunks.reverse()
+        k_chunks.reverse()
+        v_chunks.reverse()
 
-        # attention, what we cannot get enough of
-        attn = sim.softmax(dim=-1)
+        sim = torch.zeros(q1.shape[0],
+                          q1.shape[1],
+                          v1.shape[2],
+                          device=q1.device)
+        del k1, q1, v1
 
-        out = einsum('b i j, b j d -> b i d', attn, v)
-        out = rearrange(out, '(b h) n d -> b n (h d)', h=h)
-        return self.to_out(out)
+        for i in range (0, limit, att_step):
+            q_buffer = q_chunks.pop()
+            k_buffer = k_chunks.pop()
+            v_buffer = v_chunks.pop()
+            sim_buffer = einsum('b i d, b j d -> b i j',
+                                q_buffer,
+                                k_buffer) * self.scale
+            del k_buffer, q_buffer
+
+            # attention, what we cannot get enough of, by chunks
+            sim_buffer1 = sim_buffer.softmax(dim=-1)
+            del sim_buffer
+
+            sim_buffer2 = einsum('b i j, b j d -> b i d',
+                                 sim_buffer1,
+                                 v_buffer)
+            del sim_buffer1, v_buffer
+
+            sim[i:i+att_step,:,:] = sim_buffer2
+            del sim_buffer2
+
+        sim1 = rearrange(sim, '(b h) n d -> b n (h d)', h=h)
+        del sim
+        sim2 = self.to_out(sim1)
+        del sim1
+        return sim2
 
 
 class MemoryEfficientCrossAttention(nn.Module):
@@ -276,18 +308,22 @@ class MemoryEfficientCrossAttention(nn.Module):
 class BasicTransformerBlock(nn.Module):
     def __init__(self, dim, n_heads, d_head, dropout=0., context_dim=None, gated_ff=True, checkpoint=True):
         super().__init__()
+        if os.name == "nt":
+            ctor = CrossAttention
+        else:
+            ctor = MemoryEfficientCrossAttention
         # is a self-attention
-        self.attn1 = MemoryEfficientCrossAttention(query_dim=dim,
-                                                   heads=n_heads,
-                                                   dim_head=d_head,
-                                                   dropout=dropout)
+        self.attn1 = ctor(query_dim=dim,
+                          heads=n_heads,
+                          dim_head=d_head,
+                          dropout=dropout)
         self.ff = FeedForward(dim, dropout=dropout, glu=gated_ff)
         # is self-attn if context is none
-        self.attn2 = MemoryEfficientCrossAttention(query_dim=dim,
-                                                   context_dim=context_dim,
-                                                   heads=n_heads,
-                                                   dim_head=d_head,
-                                                   dropout=dropout)
+        self.attn2 = ctor(query_dim=dim,
+                          context_dim=context_dim,
+                          heads=n_heads,
+                          dim_head=d_head,
+                          dropout=dropout)
         self.norm1 = nn.LayerNorm(dim)
         self.norm2 = nn.LayerNorm(dim)
         self.norm3 = nn.LayerNorm(dim)

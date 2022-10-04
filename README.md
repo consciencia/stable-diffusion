@@ -8,7 +8,10 @@ With this, you can generate 1088x1088 images with only 4GB GPUs.
 To reduce the VRAM usage, following additional optimizations were used:
 * Better tensor memory management. Inspiration was from [here](https://github.com/Doggettx/stable-diffusion).
 * Flash attention is used instead of normal attention. Inspiration was
-  from [here](https://www.photoroom.com/tech/stable-diffusion-100-percent-faster-with-memory-efficient-attention/).
+  from [here](https://www.photoroom.com/tech/stable-diffusion-100-percent-faster-with-memory-efficient-attention/). Please note that this
+  optimization is disabled on windows because library `xformers` does
+  not build there. As an consequence, VRAM consumption is a lot higher
+  on windows than on linux.
 * First stage image encoding model and last stage image decoding model
   were moved to CPU because both are very fast and very memory hungry
   so it makes no sense to use GPU for them.
@@ -19,18 +22,20 @@ Additionally, support for negative prompts was added.
 
 First, install [conda](https://docs.conda.io/projects/conda/en/latest/user-guide/install/index.html).
 
-**If you already have `ldm` conda environment because you already used Stable 
-Diffusion, remove it because this fork uses different package versions than 
+**If you already have `ldm` conda environment because you already used Stable
+Diffusion, remove it because this fork uses different package versions than
 other forks in order to be compatible with `xformers`.**
 ```shell
 conda env remove -n ldm
 ```
 
-Then clone this repository somewhere and open terminal in its directory 
+Then clone this repository somewhere and open terminal in its directory
 and type:
 ``` shell
-conda env create -f environment.yaml
+conda env create -f environment_<platform>.yaml
 ```
+
+Where `<platform>` stands for `linux` or `windows`.
 
 Before calling stable diffusion in a terminal session, don't forget to
 activate conda environment with:
@@ -43,12 +48,11 @@ Then download snapshot of SD model with:
 curl https://www.googleapis.com/storage/v1/b/aai-blog-files/o/sd-v1-4.ckpt?alt=media > sd-v1-4.ckpt
 ```
 
-And you are done. For linux, that is.
+And you are done.
 
-Windows is currently not supported because `xformers` library does 
-not build there.
-
-**Warning: Never ever try to install explicitly `xformers`, it will fail because it is dependant on specific version of GCC and pytorch. Let conda handle this.**
+**Warning: Never ever try to install explicitly `xformers`, it will fail
+because it is dependant on specific version of GCC and pytorch. Let conda
+handle this.**
 
 <h1 align="center">Usage</h1>
 
@@ -82,8 +86,8 @@ python -B optimizedSD/optimized_img2img.py --prompt "dog" --nprompt "dry" --init
                  initialization image.
 * `--H` - Image height in pixels. Must be multiple of 64.
 * `--W` - Image width in pixels. Must be multiple of 64.
-* `--n_samples` - Number of images to generate at once. When generating 
-                  1088x1088 images, only one sample is supported on 4GB 
+* `--n_samples` - Number of images to generate at once. When generating
+                  1088x1088 images, only one sample is supported on 4GB
                   GPUs.
 
 <h1 align="center">Weight blocks</h1>
@@ -145,4 +149,4 @@ Try this:
 <h1 align="center">TODO</h1>
 
 * Fix inpainting.
-* Windows support.
+* [Library xformers does not build on windows.](https://github.com/facebookresearch/xformers/issues/437)
