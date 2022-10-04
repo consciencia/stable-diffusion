@@ -5,9 +5,6 @@ import torch
 import torch.nn.functional as F
 from torch import nn, einsum
 from einops import rearrange, repeat
-if os.name != "nt":
-    import xformers
-    import xformers.ops
 from typing import Any, Optional
 
 from ldm.modules.diffusionmodules.util import checkpoint
@@ -248,82 +245,21 @@ class CrossAttention(nn.Module):
         return sim2
 
 
-class MemoryEfficientCrossAttention(nn.Module):
-     def __init__(self, query_dim, context_dim=None, heads=8, dim_head=64, dropout=0.0):
-         super().__init__()
-         inner_dim = dim_head * heads
-         context_dim = default(context_dim, query_dim)
-
-         self.heads = heads
-         self.dim_head = dim_head
-
-         self.to_q = nn.Linear(query_dim, inner_dim, bias=False)
-         self.to_k = nn.Linear(context_dim, inner_dim, bias=False)
-         self.to_v = nn.Linear(context_dim, inner_dim, bias=False)
-
-         self.to_out = nn.Sequential(nn.Linear(inner_dim, query_dim), nn.Dropout(dropout))
-         self.attention_op: Optional[Any] = None
-
-     def forward(self, x, context=None, mask=None):
-         q_in = self.to_q(x)
-         context = default(context, x)
-         k_in = self.to_k(context)
-         v_in = self.to_v(context)
-         del context, x
-
-         b, _, _ = q_in.shape
-         q, k, v = map(
-             lambda t: t.unsqueeze(3)
-             .reshape(b, t.shape[1], self.heads, self.dim_head)
-             .permute(0, 2, 1, 3)
-             .reshape(b * self.heads, t.shape[1], self.dim_head)
-             .contiguous(),
-             (q_in, k_in, v_in),
-         )
-         del q_in, k_in, v_in
-
-         # actually compute the attention, what we cannot get enough of
-         out = xformers.ops.memory_efficient_attention(q,
-                                                       k,
-                                                       v,
-                                                       attn_bias=None,
-                                                       op=self.attention_op)
-         del q, k, v
-
-         # TODO: Use this directly in the attention operation, as a bias
-         if exists(mask):
-             raise NotImplementedError()
-         out2 = (out.unsqueeze(0)
-                 .reshape(b, self.heads, out.shape[1], self.dim_head)
-                 .permute(0, 2, 1, 3)
-                 .reshape(b, out.shape[1], self.heads * self.dim_head))
-         del out
-
-         out3 = self.to_out(out2)
-         del out2
-
-         return out3
-
-
 class BasicTransformerBlock(nn.Module):
     def __init__(self, dim, n_heads, d_head, dropout=0., context_dim=None, gated_ff=True, checkpoint=True):
         super().__init__()
-        if os.name == "nt":
-            ctor = CrossAttention
-        else:
-            ctor = MemoryEfficientCrossAttention
         # is a self-attention
-        self.attn1 = ctor(query_dim=dim,
-                          heads=n_heads,
-                          dim_head=d_head,
-                          dropout=dropout)
+        self.attn1 = CrossAttention(query_dim=dim,
+                                    heads=n_heads,
+                                    dim_head=d_head,
+                                    dropout=dropout)
         self.ff = FeedForward(dim, dropout=dropout, glu=gated_ff)
         # is self-attn if context is none
-        self.attn2 = ctor(query_dim=dim,
-                          context_dim=context_dim,
-                          heads=n_heads,
-                          dim_head=d_head,
-                          dropout=dropout)
+        self.attn2 = CrossAttention(query_dim=dim,
+                                    context_dim=context_dim,
+                                    heads=n_heads,
+                                    dim_head=d_head,
+                                    dropout=dropout)
         self.norm1 = nn.LayerNorm(dim)
         self.norm2 = nn.LayerNorm(dim)
         self.norm3 = nn.LayerNorm(dim)

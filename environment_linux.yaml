@@ -4,8 +4,6 @@ channels:
   - conda-forge
   - defaults
 dependencies:
-  - gcc=9.5.0
-  - gxx=9.5.0
   - python=3.9
   - pip=22.2.2
   - cudatoolkit=11.3
@@ -27,7 +25,6 @@ dependencies:
     - transformers==4.19.2
     - torchmetrics==0.6.0
     - kornia==0.6
-    - -e git+https://github.com/facebookresearch/xformers.git@v0.0.13#egg=xformers
     - -e git+https://github.com/CompVis/taming-transformers.git@master#egg=taming-transformers
     - -e git+https://github.com/openai/CLIP.git@main#egg=clip
     - -e .
