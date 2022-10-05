@@ -122,7 +122,7 @@ def generate(
     sample_path = os.path.join(outpath, "_".join(re.split(":| ", prompt)))[:150]
     os.makedirs(sample_path, exist_ok=True)
     base_count = len(os.listdir(sample_path))
-    
+
     # n_rows = opt.n_rows if opt.n_rows > 0 else batch_size
     assert prompt is not None
     data = [batch_size * [prompt]]
@@ -180,8 +180,9 @@ def generate(
                         x_T=start_code,
                         sampler = sampler,
                     )
+                    samples_ddim = samples_ddim.to("cpu")
 
-                    modelFS.to(device)
+                    modelFS.to("cpu")
                     print("saving images")
                     for i in range(batch_size):
 
@@ -195,12 +196,6 @@ def generate(
                         seeds += str(seed) + ","
                         seed += 1
                         base_count += 1
-
-                    if device != "cpu":
-                        mem = torch.cuda.memory_allocated() / 1e6
-                        modelFS.to("cpu")
-                        while torch.cuda.memory_allocated() / 1e6 >= mem:
-                            time.sleep(1)
 
                     del samples_ddim
                     del x_sample

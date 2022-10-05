@@ -112,7 +112,7 @@ def generate(
     # Logging
     logger(locals(), log_csv="logs/inpaint_gradio_logs.csv")
 
-    init_image = load_img(image['image'], Height, Width).to(device)
+    init_image = load_img(image['image'], Height, Width).to("cpu")
 
     model.unet_bs = unet_bs
     model.turbo = turbo
@@ -137,24 +137,19 @@ def generate(
     assert prompt is not None
     data = [batch_size * [prompt]]
 
-    modelFS.to(device)
+    modelFS.to("cpu")
 
     init_latent = modelFS.get_first_stage_encoding(modelFS.encode_first_stage(init_image))  # move to latent space
+    init_latent = init_latent.to(device)
     init_latent = repeat(init_latent, "1 ... -> b ...", b=batch_size)
     if mask_image is None:
         mask = load_mask(image['mask'], Height, Width, init_latent.shape[2], init_latent.shape[3], True).to(device)
     else:
         image['mask']=mask_image
         mask = load_mask(mask_image, Height, Width, init_latent.shape[2], init_latent.shape[3], True).to(device)
-    
+
     mask = mask[0][0].unsqueeze(0).repeat(4, 1, 1).unsqueeze(0)
     mask = repeat(mask, '1 ... -> b ...', b=batch_size)
-
-    if device != "cpu":
-        mem = torch.cuda.memory_allocated() / 1e6
-        modelFS.to("cpu")
-        while torch.cuda.memory_allocated() / 1e6 >= mem:
-            time.sleep(1)
 
     if strength == 1:
         print("strength should be less than 1, setting it to 0.999")
@@ -217,8 +212,8 @@ def generate(
                         x_T=init_latent,
                         sampler=sampler,
                     )
+                    samples_ddim = samples_ddim.to("cpu")
 
-                    modelFS.to(device)
                     print("saving images")
                     for i in range(batch_size):
                         x_samples_ddim = modelFS.decode_first_stage(samples_ddim[i].unsqueeze(0))
@@ -231,12 +226,6 @@ def generate(
                         seeds += str(seed) + ","
                         seed += 1
                         base_count += 1
-
-                    if device != "cpu":
-                        mem = torch.cuda.memory_allocated() / 1e6
-                        modelFS.to("cpu")
-                        while torch.cuda.memory_allocated() / 1e6 >= mem:
-                            time.sleep(1)
 
                     del samples_ddim
                     del x_sample

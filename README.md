@@ -148,5 +148,4 @@ Try this:
 
 <h1 align="center">TODO</h1>
 
-* Fix inpainting.
 * [Library xformers does not build on windows.](https://github.com/facebookresearch/xformers/issues/437)

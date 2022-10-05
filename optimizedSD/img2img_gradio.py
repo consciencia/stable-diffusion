@@ -123,7 +123,7 @@ def generate(
     sampler = "ddim"
     logger(locals(), log_csv = "logs/img2img_gradio_logs.csv")
 
-    init_image = load_img(image, Height, Width).to(device)
+    init_image = load_img(image, Height, Width).to("cpu")
     model.unet_bs = unet_bs
     model.turbo = turbo
     model.cdevice = device
@@ -146,16 +146,11 @@ def generate(
     assert prompt is not None
     data = [batch_size * [prompt]]
 
-    modelFS.to(device)
+    modelFS.to("cpu")
 
     init_image = repeat(init_image, "1 ... -> b ...", b=batch_size)
     init_latent = modelFS.get_first_stage_encoding(modelFS.encode_first_stage(init_image))  # move to latent space
-
-    if device != "cpu":
-        mem = torch.cuda.memory_allocated() / 1e6
-        modelFS.to("cpu")
-        while torch.cuda.memory_allocated() / 1e6 >= mem:
-            time.sleep(1)
+    init_latent = init_latent.to(device)
 
     assert 0.0 <= strength <= 1.0, "can only work with strength in [0.0, 1.0]"
     t_enc = int(strength * ddim_steps)
@@ -212,11 +207,10 @@ def generate(
                                     unconditional_conditioning=uc,
                                     sampler = sampler
                     )
+                    samples_ddim = samples_ddim.to("cpu")
 
-                    modelFS.to(device)
                     print("saving images")
                     for i in range(batch_size):
-
                         x_samples_ddim = modelFS.decode_first_stage(samples_ddim[i].unsqueeze(0))
                         x_sample = torch.clamp((x_samples_ddim + 1.0) / 2.0, min=0.0, max=1.0)
                         all_samples.append(x_sample.to("cpu"))
@@ -227,12 +221,6 @@ def generate(
                         seeds += str(seed) + ","
                         seed += 1
                         base_count += 1
-
-                    if device != "cpu":
-                        mem = torch.cuda.memory_allocated() / 1e6
-                        modelFS.to("cpu")
-                        while torch.cuda.memory_allocated() / 1e6 >= mem:
-                            time.sleep(1)
 
                     del samples_ddim
                     del x_sample
