@@ -59,7 +59,7 @@ handle this.**
 ## txt2img
 
 ``` shell
-python -B optimizedSD/optimized_txt2img.py --prompt "dog" --nprompt "dry" --precision full --ckpt sd-v1-4.ckpt --H 512 --W 512 --sampler euler_a --n_samples 10
+python -B optimizedSD/optimized_txt2img.py --prompt "dog" --nprompt "dry" --precision full --ckpt sd-v1-4.ckpt --H 512 --W 512 --n_samples 10
 ```
 * `--prompt` - Textual image description.
 * `--nprompt` - Negative textual image description. Things which you
@@ -89,6 +89,17 @@ python -B optimizedSD/optimized_img2img.py --prompt "dog" --nprompt "dry" --init
 * `--n_samples` - Number of images to generate at once. When generating
                   1088x1088 images, only one sample is supported on 4GB
                   GPUs.
+
+### Inpainting
+
+Use `optimized_img2img.py` as with standard img2img but with additional
+parameters.
+
+* `--mask` - Path to image mask. Must have same resolution as generated
+             image. Surface filled with white pixels will be regenerated
+             by Stable Diffusion while surface filled with black pixels
+             will be untouched.
+* `--invert-mask` - Inverts mask.
 
 <h1 align="center">Weight blocks</h1>
 
@@ -133,7 +144,7 @@ resulting composition does not make sense.
 
 You can mitigate this by first generating 512x512 image. Then resizing
 it (not upscaling) to desired resolution and feeding it to img2img
-together with original prompt and `--strength 0.75`. Stable diffusion
+together with original prompt and `--strength 0.5`. Stable diffusion
 will then just polish things up without trying to come up with some
 new composition.
 

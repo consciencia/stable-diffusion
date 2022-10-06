@@ -52,7 +52,6 @@ def vectorize_prompt(modelCS, batch_size, prompt):
 
 
 def load_img(path, h0, w0):
-
     image = Image.open(path).convert("RGB")
     w, h = image.size
 
@@ -68,6 +67,30 @@ def load_img(path, h0, w0):
     image = image[None].transpose(0, 3, 1, 2)
     image = torch.from_numpy(image)
     return 2.0 * image - 1.0
+
+
+def load_mask(mask, h0, w0, newH, newW, invert=False):
+    image = Image.open(mask).convert("RGB")
+    w, h = image.size
+    print(f"loaded input mask of size ({w}, {h})")
+    if h0 is not None and w0 is not None:
+        h, w = h0, w0
+
+    w, h = map(lambda x: x - x % 64, (w, h))  # resize to integer multiple of 32
+
+    print(f"New mask size ({w}, {h})")
+    image = image.resize((newW, newH), resample=Image.LANCZOS)
+    # image = image.resize((64, 64), resample=Image.LANCZOS)
+    image = np.array(image)
+
+    if invert:
+        print("inverted")
+        where_0, where_1 = np.where(image == 0), np.where(image == 255)
+        image[where_0], image[where_1] = 255, 0
+    image = image.astype(np.float32) / 255.0
+    image = image[None].transpose(0, 3, 1, 2)
+    image = torch.from_numpy(image)
+    return image
 
 
 config = "optimizedSD/v1-inference.yaml"
@@ -115,7 +138,6 @@ parser.add_argument(
     default=50,
     help="number of ddim sampling steps",
 )
-
 parser.add_argument(
     "--ddim_eta",
     type=float,
@@ -193,7 +215,11 @@ parser.add_argument(
     help="Reduces inference time on the expense of 1GB VRAM",
 )
 parser.add_argument(
-    "--precision", type=str, help="evaluate at this precision", choices=["full", "autocast"], default="autocast"
+    "--precision",
+    type=str,
+    help="evaluate at this precision",
+    choices=["full", "autocast"],
+    default="autocast"
 )
 parser.add_argument(
     "--format",
@@ -214,6 +240,17 @@ parser.add_argument(
     type=str,
     help="path to checkpoint of model",
     default=DEFAULT_CKPT,
+)
+parser.add_argument(
+    "--mask",
+    type=str,
+    required=False,
+    help="path to mask for inpainting"
+)
+parser.add_argument(
+    "--invert-mask",
+    action="store_true",
+    help="whether to invert mask"
 )
 opt = parser.parse_args()
 
@@ -251,6 +288,18 @@ config = OmegaConf.load(f"{config}")
 
 assert os.path.isfile(opt.init_img)
 init_image = load_img(opt.init_img, opt.H, opt.W).to("cpu")
+mask = None
+if opt.mask is not None:
+    mask = load_mask(opt.mask,
+                     opt.H,
+                     opt.W,
+                     opt.H,
+                     opt.W,
+                     opt.invert_mask).to(opt.device)
+    mask = mask[0][0].unsqueeze(0).repeat(4, 1, 1).unsqueeze(0)
+    mask = repeat(mask,
+                  "1 ... -> b ...",
+                  b=opt.n_samples)
 
 model = instantiate_from_config(config.modelUNet)
 _, _ = model.load_state_dict(sd, strict=False)
@@ -349,7 +398,8 @@ with torch.no_grad():
                     z_enc,
                     unconditional_guidance_scale=opt.scale,
                     unconditional_conditioning=uc,
-                    sampler = opt.sampler
+                    sampler=opt.sampler,
+                    mask=mask
                 )
 
                 samples_ddim = samples_ddim.to("cpu")
