@@ -59,7 +59,7 @@ handle this.**
 ## txt2img
 
 ``` shell
-python -B optimizedSD/optimized_txt2img.py --prompt "dog" --nprompt "dry" --precision full --ckpt sd-v1-4.ckpt --H 512 --W 512 --n_samples 10 --ddim_steps 50
+python -B scripts/txt2img.py --prompt "dog" --nprompt "dry" --precision full --ckpt sd-v1-4.ckpt --H 512 --W 512 --n_samples 10 --ddim_steps 50
 ```
 * `--prompt` - Textual image description.
 * `--nprompt` - Negative textual image description. Things which you
@@ -74,7 +74,7 @@ python -B optimizedSD/optimized_txt2img.py --prompt "dog" --nprompt "dry" --prec
 ## img2img
 
 ``` shell
-python -B optimizedSD/optimized_img2img.py --prompt "dog" --nprompt "dry" --init-img path/to/init/image.jpg --strength 0.75 --precision full --ckpt sd-v1-4.ckpt --H 512 --W 512 --n_samples 1 --ddim_steps 50
+python -B scripts/img2img.py --prompt "dog" --nprompt "dry" --init-img path/to/init/image.jpg --strength 0.75 --precision full --ckpt sd-v1-4.ckpt --H 512 --W 512 --n_samples 1 --ddim_steps 50
 ```
 * `--prompt` - Textual image description.
 * `--nprompt` - Negative textual image description. Things which you
@@ -94,17 +94,13 @@ python -B optimizedSD/optimized_img2img.py --prompt "dog" --nprompt "dry" --init
 
 ### Inpainting
 
-Use `optimized_img2img.py` as with standard img2img but with additional
+Use `img2img.py` as with standard img2img but with additional
 parameters.
 
 Inpainting require higher sampler step count. Using `--ddim_steps 100`
 should be enough.
 
 Option `--strength` works as usual.
-
-Please note that inpainting is good for changing or removing already
-present things in image. Adding new things without additional hints
-from init image is very often impossible.
 
 * `--mask` - Path to image mask. Must have same resolution as generated
              image. Surface filled with white pixels will be regenerated

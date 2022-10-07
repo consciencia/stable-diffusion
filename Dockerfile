@@ -34,4 +34,4 @@ RUN ln -s /data /root/stable-diffusion/models/ldm/stable-diffusion-v1 \
 WORKDIR /root/stable-diffusion
 
 ENTRYPOINT ["/root/stable-diffusion/docker-bootstrap.sh"]
-CMD python optimizedSD/txt2img_gradio.py
+CMD python scripts/txt2img_gradio.py
