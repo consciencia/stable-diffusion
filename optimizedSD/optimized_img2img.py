@@ -288,18 +288,6 @@ config = OmegaConf.load(f"{config}")
 
 assert os.path.isfile(opt.init_img)
 init_image = load_img(opt.init_img, opt.H, opt.W).to("cpu")
-mask = None
-if opt.mask is not None:
-    mask = load_mask(opt.mask,
-                     opt.H,
-                     opt.W,
-                     opt.H,
-                     opt.W,
-                     opt.invert_mask).to(opt.device)
-    mask = mask[0][0].unsqueeze(0).repeat(4, 1, 1).unsqueeze(0)
-    mask = repeat(mask,
-                  "1 ... -> b ...",
-                  b=opt.n_samples)
 
 model = instantiate_from_config(config.modelUNet)
 _, _ = model.load_state_dict(sd, strict=False)
@@ -342,6 +330,19 @@ modelFS.to("cpu")
 init_image = repeat(init_image, "1 ... -> b ...", b=batch_size)
 init_latent = modelFS.get_first_stage_encoding(modelFS.encode_first_stage(init_image))  # move to latent space
 init_latent = init_latent.to(opt.device)
+
+mask = None
+if opt.mask is not None:
+    mask = load_mask(opt.mask,
+                     opt.H,
+                     opt.W,
+                     init_latent.shape[2],
+                     init_latent.shape[3],
+                     not opt.invert_mask).to(opt.device)
+    mask = mask[0][0].unsqueeze(0).repeat(4, 1, 1).unsqueeze(0)
+    mask = repeat(mask,
+                  "1 ... -> b ...",
+                  b=batch_size)
 
 assert 0.0 <= opt.strength <= 1.0, "can only work with strength in [0.0, 1.0]"
 t_enc = int(opt.strength * opt.ddim_steps)
@@ -398,8 +399,9 @@ with torch.no_grad():
                     z_enc,
                     unconditional_guidance_scale=opt.scale,
                     unconditional_conditioning=uc,
-                    sampler=opt.sampler,
-                    mask=mask
+                    mask=mask,
+                    x_T=init_latent,
+                    sampler=opt.sampler
                 )
 
                 samples_ddim = samples_ddim.to("cpu")
