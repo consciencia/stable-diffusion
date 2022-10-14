@@ -8,10 +8,7 @@ With this, you can generate 1088x1088 images with only 4GB GPUs.
 To reduce the VRAM usage, following additional optimizations were used:
 * Better tensor memory management. Inspiration was from [here](https://github.com/Doggettx/stable-diffusion).
 * Flash attention is used instead of normal attention. Inspiration was
-  from [here](https://www.photoroom.com/tech/stable-diffusion-100-percent-faster-with-memory-efficient-attention/). Please note that this
-  optimization is disabled on windows because library `xformers` does
-  not build there. As an consequence, VRAM consumption is a lot higher
-  on windows than on linux.
+  from [here](https://www.photoroom.com/tech/stable-diffusion-100-percent-faster-with-memory-efficient-attention/).
 * First stage image encoding model and last stage image decoding model
   were moved to CPU because both are very fast and very memory hungry
   so it makes no sense to use GPU for them.
@@ -59,7 +56,7 @@ handle this.**
 ## txt2img
 
 ``` shell
-python -B scripts/txt2img.py --prompt "dog" --nprompt "dry" --precision full --ckpt sd-v1-4.ckpt --H 512 --W 512 --n_samples 10 --ddim_steps 50
+python -B scripts/txt2img.py --prompt "dog" --nprompt "dry" --precision full --ckpt sd-v1-4.ckpt --H 512 --W 512 --n_samples 10 --ddim_steps 50 --scale 7.5
 ```
 * `--prompt` - Textual image description.
 * `--nprompt` - Negative textual image description. Things which you
@@ -70,11 +67,15 @@ python -B scripts/txt2img.py --prompt "dog" --nprompt "dry" --precision full --c
                   generating 1088x1088 images, only one sample is
                   supported on 4GB GPUs.
 * `--ddim_steps` - Number of sampler steps. Usually 50 is good enough.
+* `--scale` - Guidance scale. Higher number results in more literal
+              interpretation of your prompts. Default is 7.5 and its
+              not recommended to go above 20. This parameter is also
+              known as CFG.
 
 ## img2img
 
 ``` shell
-python -B scripts/img2img.py --prompt "dog" --nprompt "dry" --init-img path/to/init/image.jpg --strength 0.75 --precision full --ckpt sd-v1-4.ckpt --H 512 --W 512 --n_samples 1 --ddim_steps 50
+python -B scripts/img2img.py --prompt "dog" --nprompt "dry" --init-img path/to/init/image.jpg --strength 0.75 --precision full --ckpt sd-v1-4.ckpt --H 512 --W 512 --n_samples 1 --ddim_steps 50 --scale 7.5
 ```
 * `--prompt` - Textual image description.
 * `--nprompt` - Negative textual image description. Things which you
@@ -91,6 +92,10 @@ python -B scripts/img2img.py --prompt "dog" --nprompt "dry" --init-img path/to/i
                   1088x1088 images, only one sample is supported on 4GB
                   GPUs.
 * `--ddim_steps` - Number of sampler steps. Usually 50 is good enough.
+* `--scale` - Guidance scale. Higher number results in more literal
+              interpretation of your prompts. Default is 7.5 and its
+              not recommended to go above 20. This parameter is also
+              known as CFG.
 
 ### Inpainting
 
@@ -107,6 +112,16 @@ Option `--strength` works as usual.
              by Stable Diffusion while surface filled with black pixels
              will be untouched.
 * `--invert-mask` - Inverts mask.
+
+Please note that model does not know which part of image should be
+changed, inpainting is implemented through discarding changes affecting
+masked parts of initialization image. This imply that you should use
+inpainting together with very similar prompt to one which created
+original image in order to get desired effect.
+
+Inpainting is generally good for refining and correcting previously
+generated images. Using it for anything else would probably result in
+fail.
 
 <h1 align="center">Weight blocks</h1>
 
@@ -163,7 +178,3 @@ Try this:
 ``` shell
 --nprompt "extra limbs, deformed body, blurred, long neck"
 ```
-
-<h1 align="center">TODO</h1>
-
-* [Library xformers does not build on windows.](https://github.com/facebookresearch/xformers/issues/437)

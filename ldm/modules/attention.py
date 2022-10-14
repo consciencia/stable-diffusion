@@ -5,9 +5,8 @@ import torch
 import torch.nn.functional as F
 from torch import nn, einsum
 from einops import rearrange, repeat
-if os.name != "nt":
-    import xformers
-    import xformers.ops
+import xformers
+import xformers.ops
 from typing import Any, Optional
 
 from ldm.modules.diffusionmodules.util import checkpoint
@@ -308,10 +307,8 @@ class MemoryEfficientCrossAttention(nn.Module):
 class BasicTransformerBlock(nn.Module):
     def __init__(self, dim, n_heads, d_head, dropout=0., context_dim=None, gated_ff=True, checkpoint=True):
         super().__init__()
-        if os.name == "nt":
-            ctor = CrossAttention
-        else:
-            ctor = MemoryEfficientCrossAttention
+        # ctor = CrossAttention
+        ctor = MemoryEfficientCrossAttention
         # is a self-attention
         self.attn1 = ctor(query_dim=dim,
                           heads=n_heads,
