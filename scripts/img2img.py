@@ -17,6 +17,7 @@ from ldm.util import instantiate_from_config
 from optimUtils import split_weighted_subprompts, logger
 from transformers import logging
 import pandas as pd
+import safeloader
 logging.set_verbosity_error()
 
 

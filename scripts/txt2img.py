@@ -15,6 +15,7 @@ from contextlib import contextmanager, nullcontext
 from ldm.util import instantiate_from_config
 from optimUtils import split_weighted_subprompts, logger
 from transformers import logging
+import safeloader
 # from samplers import CompVisDenoiser
 logging.set_verbosity_error()
 
