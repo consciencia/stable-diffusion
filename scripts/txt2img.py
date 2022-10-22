@@ -16,6 +16,7 @@ from ldm.util import instantiate_from_config
 from optimUtils import split_weighted_subprompts, logger
 from transformers import logging
 import safeloader
+import simulacra
 # from samplers import CompVisDenoiser
 logging.set_verbosity_error()
 
@@ -205,7 +206,18 @@ parser.add_argument(
     help="path to checkpoint of model",
     default=DEFAULT_CKPT,
 )
+parser.add_argument(
+    "--aesthetic-threshold",
+    type=float,
+    help="all generated images below this score will be removed",
+    default=0.0,
+)
 opt = parser.parse_args()
+
+if opt.aesthetic_threshold < 0:
+    raise Exception("Option --aesthetic-threshold can't be negative!")
+if opt.aesthetic_threshold > 10:
+    raise Exception("Option --aesthetic-threshold can't be greater than 10!")
 
 tic = time.time()
 os.makedirs(opt.outdir, exist_ok=True)
@@ -337,13 +349,18 @@ with torch.no_grad():
 
                 print(samples_ddim.shape)
                 print("saving images")
+                dest_paths = []
                 for i in range(batch_size):
                     x_samples_ddim = modelFS.decode_first_stage(samples_ddim[i].unsqueeze(0))
-                    x_sample = torch.clamp((x_samples_ddim + 1.0) / 2.0, min=0.0, max=1.0)
-                    x_sample = 255.0 * rearrange(x_sample[0].cpu().numpy(), "c h w -> h w c")
-                    Image.fromarray(x_sample.astype(np.uint8)).save(
-                        os.path.join(sample_path, "seed_" + str(opt.seed) + "_" + f"{base_count:05}.{opt.format}")
-                    )
+                    x_sample = torch.clamp((x_samples_ddim + 1.0) / 2.0,
+                                           min=0.0,
+                                           max=1.0)
+                    x_sample = 255.0 * rearrange(x_sample[0].cpu().numpy(),
+                                                 "c h w -> h w c")
+                    dest_path = os.path.join(sample_path,
+                                             f"seed_{opt.seed}_{base_count:05}.{opt.format}")
+                    dest_paths.append(dest_path)
+                    Image.fromarray(x_sample.astype(np.uint8)).save(dest_path)
                     seeds += str(opt.seed) + ","
                     opt.seed += 1
                     base_count += 1
@@ -352,14 +369,15 @@ with torch.no_grad():
                 print("memory_final = ", torch.cuda.memory_allocated() / 1e6)
 
 toc = time.time()
-
 time_taken = (toc - tic) / 60.0
 
-print(
-    (
-        "Samples finished in {0:.2f} minutes and exported to "
-        + sample_path
-        + "\n Seeds used = "
-        + seeds[:-1]
-    ).format(time_taken)
-)
+print(f"Samples finished in {time_taken:.2f} minutes "
+      f"and exported to {sample_path}")
+print(f" Seeds used = {seeds[:-1]}")
+print("Images with aesthetic scores:")
+for img_path in dest_paths:
+    score = float(simulacra.judge(img_path))
+    if score >= opt.aesthetic_threshold:
+        print(f" {os.path.realpath(img_path)} - {score}")
+    else:
+        os.remove(img_path)

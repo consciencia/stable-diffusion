@@ -13,7 +13,14 @@ To reduce the VRAM usage, following additional optimizations were used:
   were moved to CPU because both are very fast and very memory hungry
   so it makes no sense to use GPU for them.
 
-Additionally, support for negative prompts was added.
+Following additional features were added:
+* Negative prompts.
+* Model safety checker so you can safely use models from unofficial
+  sources. You can also additionally download `picklescan` for
+  crosschecking.
+* Image aesthetic filtering. Aesthetic scoring is provided
+  by [simulacra](https://github.com/crowsonkb/simulacra-aesthetic-models). You can learn more about aesthetic
+  biases [here](https://github.com/JD-P/simulacra-aesthetic-captions).
 
 <h1 align="center">Installation</h1>
 
@@ -71,6 +78,10 @@ python -B scripts/txt2img.py --prompt "dog" --nprompt "dry" --precision full --c
               interpretation of your prompts. Default is 7.5 and its
               not recommended to go above 20. This parameter is also
               known as CFG.
+* `--aesthetic-threshold` - Floating point number between 0 (default)
+                            and 10. All generated images with aesthetic
+                            score lesser than passed value will be
+                            discarded.
 
 ## img2img
 
@@ -96,6 +107,10 @@ python -B scripts/img2img.py --prompt "dog" --nprompt "dry" --init-img path/to/i
               interpretation of your prompts. Default is 7.5 and its
               not recommended to go above 20. This parameter is also
               known as CFG.
+* `--aesthetic-threshold` - Floating point number between 0 (default)
+                            and 10. All generated images with aesthetic
+                            score lesser than passed value will be
+                            discarded.
 
 ### Inpainting
 
@@ -176,5 +191,5 @@ human bodies. You can mitigate this by using negative prompts.
 
 Try this:
 ``` shell
---nprompt "extra limbs, deformed body, blurred, long neck"
+--nprompt "lowres, deformed, disfigured, extra hands, extra legs, extra fingers, missing fingers, ugly face, deformed face, deformed hands, deformed legs, blurry, long neck, text, error, watermark"
 ```
